@@ -1,0 +1,7 @@
+{
+	"Port": 8080,
+	"Host": "127.0.0.1",
+	"Username": "tester",
+	"Password": "password",
+	"Database": "test"
+}

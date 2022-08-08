@@ -1,0 +1,254 @@
+<html>
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+        <title>Тест</title>
+        <script>
+            "use strict";
+            var username = "";
+
+            function getCookie(name) {
+                const value = `; ${document.cookie}`;
+                const parts = value.split(`; ${name}=`);
+                if (parts.length === 2) return parts.pop().split(';').shift();
+            }
+
+            function LoginFormShow() {
+                document.getElementById("error_message").innerHTML = "";
+                document.getElementById("login_div").style.setProperty("display", "block")
+            }
+        
+            function LoginFormHide() {
+                document.getElementById("login_div").style.setProperty("display", "none")
+            }
+        
+            function sendRequest(url, method, data, callback) {
+                const request = new XMLHttpRequest();
+                let params = "";
+                let sep = "";
+                for (let key in data) {
+                    params += sep + key + "=" + data[key];
+                    sep = "&"
+                }
+                request.open(method, url, true);
+                request.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+                request.addEventListener("readystatechange", () => {
+                    if(request.readyState === 4) {  
+                         callback(request);
+                    }
+                });
+                request.send(params);
+            }
+
+            function LoginAction(username) {
+                document.getElementById("error_message").innerHTML = "";
+                document.getElementById("login_block").style.setProperty("display", "none");
+                document.getElementById("login_div").style.setProperty("display", "none");
+                document.getElementById("username").innerHTML = username;
+                document.getElementById("logout_block").style.setProperty("display", "block");
+                showVariants(loadVariants());
+            }
+        
+            function Login() {
+                const data = {
+                    login: document.getElementById("login").value,
+                    password: document.getElementById("password").value
+                }
+                sendRequest("/login", "POST", data,
+                (request) => {
+                    if (request.status == 200) {
+                        LoginAction(data.login);
+                    } else if (request.status == 401) {
+                        document.getElementById("error_message").innerHTML = "Incorrect username or password";
+                    } else {
+                        document.getElementById("error_message").innerHTML = "Login error: response status " + request.Status;
+                    }
+                })
+            }
+        
+            window.onload = function() {
+                if (getCookie("session_token")) {
+                    sendRequest("/session_status", "GET", {},
+                    (request) => {
+                    let s = JSON.parse(request.responseText);
+                    if (request.responseText != "" && s.Status) {
+                            LoginAction(s.Username);
+                        }
+                    })
+                }
+
+                document.getElementById("login")
+                    .addEventListener("keyup", function(event) {
+                        event.preventDefault();
+                        if (event.keyCode === 13) {
+                            document.getElementById("password").focus();
+                        }
+                    });
+
+                document.getElementById("password")
+                    .addEventListener("keyup", function(event) {
+                        event.preventDefault();
+                        if (event.keyCode === 13) {
+                            document.getElementById("login_button").click();
+                        }
+                    });
+            }
+        
+            function Logout() {
+                const data = {
+                    login: document.getElementById("login").value
+                }
+                sendRequest("/logout", "PUT", data,
+                (request) => {
+                    if (request.status == 200) {
+                        document.getElementById("login_block").style.setProperty("display", "block");
+                        document.getElementById("logout_block").style.setProperty("display", "none");
+                        document.getElementById("variants_block").innerHTML = "";
+                    } else {
+                        document.getElementById("error_message").innerHTML = "Error: " + request.status;
+                    }
+                })
+            }
+        
+            function showVariants(variants) {
+                document.getElementById("variants_block").style.setProperty("display", "block");
+                document.getElementById("variants_block").innerHTML = "<h2>Variants</h2><ul>";
+                for (let variant in variants) {
+                    document.getElementById("variants_block").innerHTML += "<li><a href='#' onclick='startTest(" + variants[variant].Id + ");'>" + variants[variant].Name + "</a></li>";
+                }
+                document.getElementById("variants_block").innerHTML += "</ul>";
+            }
+        
+            function loadVariants() {
+                sendRequest("/variants", "GET", {}, (request) => {
+                    let response = JSON.parse(request.responseText);
+                    if (response.Status) {
+                        showVariants(response.Variants);
+                    } else {
+                        document.getElementById("error_message").innerHTML = response.Error;
+                    }
+                })
+            }
+
+            function testQuestion(variant, questionId) {
+                sendRequest("/question/" + variant + "/" + questionId + "/", "GET", {}, (request) => {
+                    document.getElementById("variants_block").style.setProperty("display", "none");
+                    document.getElementById("test_block").style.setProperty("display", "block");
+                    let question = JSON.parse(request.responseText);
+                    if (!question.Status) {
+                        document.getElementById("test_block").innerHTML = "<h2 style='color: red'>" + question.Error + "</h2>";
+                        return
+                    }
+                    document.getElementById("test_block").innerHTML = "<b>" + question.Question.Text + "</b><form>";
+                    for (let answer in question.Question.Answers) {
+                        let checked = "";
+                        if (getCookie("question" + questionId) == question.Question.Answers[answer].Id) {
+                            checked = " checked";
+                        }
+                        document.getElementById("test_block").innerHTML += "<input type='radio' name='answer' value='" + question.Question.Answers[answer].Id + "'" + checked + ">" + question.Question.Answers[answer].Text + "</input><br>";
+                    }
+                    document.getElementById("test_block").innerHTML += "</form><br>";
+                    if (questionId > 1) {
+                        document.getElementById("test_block").innerHTML += "<input type='button' value='Previous' onclick='storeAndJump(" + variant + ", " + (questionId - 1) + ", " + questionId + ")'/>&nbsp;";
+                    } else {
+                        document.getElementById("test_block").innerHTML += "<input type='button' value='Previous' disabled/>&nbsp;";
+                    }
+                    if (question.Next) {
+                        document.getElementById("test_block").innerHTML += "<input type='button' value='Next' onclick='storeAndJump(" + variant + ", " + (questionId + 1) + ", " + questionId + ")'/>";
+                    } else {
+                        document.getElementById("test_block").innerHTML += "<input type='button' value='Next' disabled/>";
+                    }
+                    document.getElementById("test_block").innerHTML += "<br><br><input type='button' value='Done' onclick='sendAnswers(" + variant + ", " + questionId + ")'/>";
+                })
+            }
+
+            function startTest(variant) {
+                sendRequest("/start/" + variant, "POST", null, (request) => {
+                    let response = JSON.parse(request.responseText);
+                    if (response.Status) {
+                        testQuestion(variant, 1);
+                        document.cookie = "variant=" + variant + ";SameSite=strict";
+                        document.getElementById("error_message").innerHTML = "";
+                    } else {
+                        document.getElementById("error_message").innerHTML = "Cannot start test";
+                    }
+                });
+            }
+
+            function storeAnswer(questionId) {
+                let answer = document.querySelector('input[name="answer"]:checked');
+                if (answer) {
+                    document.cookie = "question" + questionId + "=" + answer.value + ";SameSite=strict";
+                }
+            }
+
+            function storeAndJump(variant, next, questionId) {
+                storeAnswer(questionId);
+                testQuestion(variant, next);
+            }
+
+            function getAnswers() {
+                let answers = [];
+                const values = document.cookie.split("; ");
+                for (let value in values) {
+                    if (values[value].startsWith("question")) {
+                        let answer = values[value].split("=");
+                        answers.push([Number(answer[1])]);
+                    }
+                }
+                return answers;
+            }
+
+            function clearAnswers() {
+                const values = document.cookie.split("; ");
+                for (let value in values) {
+                    if (values[value].startsWith("question")) {
+                        document.cookie = values[value].split("=")[0] + "=0;max-age=-1;SameSite=strict";
+                    }
+                }
+                document.cookie = "variant=0;max-age=-1;SameSite=strict";
+            }
+
+            function getResult(testId) {
+                sendRequest("/result/" + testId, "GET", null, (request) => {
+                    let response = JSON.parse(request.responseText);
+                    if (response.Status) {
+                        document.getElementById("test_block").innerHTML = "<h2>Result: " + response.Result + "%</h2>";
+                    }
+                });
+            }
+
+            function sendAnswers(variant, questionId) {
+                storeAnswer(questionId);
+                sendRequest("/save_answers", "POST", {variant: variant, answers: getAnswers()}, (request) => {
+                    let response = JSON.parse(request.responseText);
+                    if (response.Status) {
+                        clearAnswers();
+                        getResult(response.TestId);
+                    } else {
+                        document.getElementById("error_message").innerHTML = response.Error;
+                    }
+                });
+            }
+        </script>
+    </head>
+    <body>
+        <h1>Test</h1>
+        <div id="error_message" style="color: red;"></div>
+        <div id="login_block">
+            <a href="#" onclick="LoginFormShow()">Log in</a><br>
+            <div id="login_div" style="display: none; margin-top: 1em;">
+                <form id="login_form">
+                    <input id="login" type="text" name="login" placeholder="Login"><br>
+                    <input id="password" type="password" name="password" placeholder="Password"><br><br>
+                    <input id="login_button" type="button" value="Log in" onclick="Login()">
+                    <input type="button" value="Cancel" onclick="LoginFormHide()">
+                </form>
+            </div>
+        </div>
+        <div id="logout_block" style="display: none;">
+            <span id="username"></span> (<a href="#" onclick="Logout()">Log out</a>)
+        </div>
+        <div id="variants_block" style="display: none; margin-top: 1em;"></div>
+        <div id="test_block" style="display: none; margin-top: 1em;"></div>
+    </body>
+</html>
